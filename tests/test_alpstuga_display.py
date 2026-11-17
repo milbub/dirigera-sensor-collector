@@ -6,16 +6,16 @@ from datetime import time
 
 import pytest
 
-from dirigera_sensor_collector import display
+from dirigera_sensor_collector import display_cli
+from dirigera_sensor_collector.config import parse_clock_time
 from dirigera_sensor_collector.display import (
     desired_display_state,
     is_alpstuga_device,
-    parse_clock_time,
     parse_device_ids,
-    parse_display_state,
     set_alpstuga_displays,
     validate_alpstuga_display,
 )
+from dirigera_sensor_collector.display_cli import parse_display_state
 from fakes import ALPSTUGA_ID, TIMMERFLOTE_ID, FakeHub, alpstuga_device, make_device
 
 
@@ -164,7 +164,7 @@ class TestCli:
     ) -> None:
         monkeypatch.setattr("sys.argv", ["alpstuga_display.py"])
 
-        assert display.main() == 2
+        assert display_cli.main() == 2
         assert "Usage" in capsys.readouterr().err
 
     @pytest.mark.parametrize(
@@ -189,7 +189,7 @@ class TestCli:
         for name, value in env.items():
             monkeypatch.setenv(name, value)
 
-        assert display.main() == 2
+        assert display_cli.main() == 2
         assert message in caplog.text
 
     def test_switches_displays(
@@ -201,7 +201,7 @@ class TestCli:
         monkeypatch.setenv("DIRIGERA_IP", "192.0.2.10")
         monkeypatch.setenv("DIRIGERA_TOKEN", "t")
         monkeypatch.setenv("ALPSTUGA_DISPLAY_CONTROL_IDS", ALPSTUGA_ID)
-        monkeypatch.setattr("dirigera.Hub", lambda **_kwargs: fake_hub)
+        monkeypatch.setattr(display_cli, "Hub", lambda **_kwargs: fake_hub)
 
-        assert display.main() == 0
+        assert display_cli.main() == 0
         assert fake_hub.devices[ALPSTUGA_ID]["attributes"]["isOn"] is False

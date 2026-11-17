@@ -6,13 +6,13 @@ from typing import Callable
 
 import pytest
 
-from dirigera_sensor_collector.service import (
+from dirigera_sensor_collector.reachability import (
     InfluxDecision,
     InfluxStatus,
     ReachabilityGate,
-    SensorReading,
     format_duration,
 )
+from dirigera_sensor_collector.sensors import SensorReading
 
 ReadingFactory = Callable[..., SensorReading]
 

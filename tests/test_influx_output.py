@@ -6,7 +6,9 @@ from typing import Any, Callable
 
 import pytest
 
-from dirigera_sensor_collector.service import InfluxOutput, SensorReading, Settings
+from dirigera_sensor_collector.config import Settings
+from dirigera_sensor_collector.influx import InfluxOutput
+from dirigera_sensor_collector.sensors import SensorReading
 
 ReadingFactory = Callable[..., SensorReading]
 

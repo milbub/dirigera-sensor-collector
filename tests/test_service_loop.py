@@ -8,15 +8,15 @@ import pytest
 
 from dirigera_sensor_collector import service
 from fakes import ALPSTUGA_ID, TIMMERFLOTE_ID, FakeHub
-from dirigera_sensor_collector.service import (
-    InfluxOutput,
+from dirigera_sensor_collector.config import Settings
+from dirigera_sensor_collector.influx import InfluxOutput
+from dirigera_sensor_collector.reachability import ReachabilityGate
+from dirigera_sensor_collector.scheduler import (
     LocalAlpstugaDisplayScheduler,
-    ReachabilityGate,
-    Settings,
     apply_display_schedule,
     create_display_scheduler,
-    poll_and_output_sensors,
 )
+from dirigera_sensor_collector.service import poll_and_output_sensors
 
 NIGHT = datetime(2026, 1, 1, 23, 0, 0)
 DAY = datetime(2026, 1, 1, 12, 0, 0)

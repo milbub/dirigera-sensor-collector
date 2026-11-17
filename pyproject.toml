@@ -21,7 +21,7 @@ dynamic = ["dependencies"]
 
 [project.scripts]
 dirigera-sensor-collector = "dirigera_sensor_collector.service:main"
-alpstuga-display = "dirigera_sensor_collector.display:main"
+alpstuga-display = "dirigera_sensor_collector.display_cli:main"
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }

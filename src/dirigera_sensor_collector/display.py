@@ -1,28 +1,15 @@
-#!/usr/bin/env python3
 """Control IKEA ALPSTUGA displays through a DIRIGERA hub.
 
-This module can be imported by another application or run directly:
-
-    python alpstuga_display.py on
-    python alpstuga_display.py off
-
-Required environment variables:
-
-    DIRIGERA_IP
-    DIRIGERA_TOKEN
-    ALPSTUGA_DISPLAY_CONTROL_IDS
-
-Multiple device IDs in ALPSTUGA_DISPLAY_CONTROL_IDS must be separated by
-commas. Use the real DIRIGERA endpoint IDs, including their ``_1`` suffix.
+Displays are switched by patching the ``isOn`` attribute of the ALPSTUGA
+endpoint, because the dirigera library offers no typed API for it. All
+devices are validated before the first change and verified afterwards.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import sys
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import time
 from typing import Any, Protocol, Sequence
 
 
@@ -69,37 +56,6 @@ def parse_device_ids(raw_value: str) -> tuple[str, ...]:
         unique_ids.append(device_id)
 
     return tuple(unique_ids)
-
-
-def parse_display_state(raw_value: str) -> bool:
-    """Convert a command-line display state to a boolean."""
-    normalized = raw_value.strip().lower()
-
-    if normalized in {"on", "true", "1"}:
-        return True
-
-    if normalized in {"off", "false", "0"}:
-        return False
-
-    raise ValueError(
-        "Display state must be one of: on, off, true, false, 1, 0"
-    )
-
-
-def parse_clock_time(raw_value: str, variable_name: str) -> time:
-    """Parse an exact local clock time in HH:MM:SS format."""
-    value = raw_value.strip()
-
-    if not value:
-        raise ValueError(f"{variable_name} must not be empty")
-
-    try:
-        return datetime.strptime(value, "%H:%M:%S").time()
-    except ValueError as exc:
-        raise ValueError(
-            f"{variable_name} must use the HH:MM:SS format, "
-            f"for example 22:00:00; received {value!r}"
-        ) from exc
 
 
 def is_alpstuga_device(device: dict[str, Any]) -> bool:
@@ -312,88 +268,3 @@ def desired_display_state(
         )
 
     return not is_off_interval
-
-
-def configure_logging() -> None:
-    """Configure logging for standalone command-line use."""
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-
-def main() -> int:
-    """Run ALPSTUGA display control as a standalone command."""
-    configure_logging()
-
-    if len(sys.argv) != 2:
-        print(
-            f"Usage: {sys.argv[0]} on|off",
-            file=sys.stderr,
-        )
-        return 2
-
-    try:
-        from dirigera import Hub
-
-        enabled = parse_display_state(sys.argv[1])
-
-        hub_ip = os.getenv("DIRIGERA_IP", "").strip()
-        token = os.getenv("DIRIGERA_TOKEN", "").strip()
-        device_ids = parse_device_ids(
-            os.getenv("ALPSTUGA_DISPLAY_CONTROL_IDS", "")
-        )
-
-        if not hub_ip:
-            raise ValueError(
-                "DIRIGERA_IP is empty. "
-                "Set it to the IP address of your DIRIGERA hub."
-            )
-
-        if not token:
-            raise ValueError("DIRIGERA_TOKEN must not be empty")
-
-        if not device_ids:
-            raise ValueError(
-                "ALPSTUGA_DISPLAY_CONTROL_IDS must contain at least "
-                "one ALPSTUGA endpoint ID"
-            )
-
-        hub = Hub(
-            token=token,
-            ip_address=hub_ip,
-        )
-
-        results = set_alpstuga_displays(
-            hub=hub,
-            device_ids=device_ids,
-            enabled=enabled,
-            verify=True,
-        )
-
-        requested_state = "on" if enabled else "off"
-
-        for result in results:
-            LOGGER.info(
-                "ALPSTUGA display %s (%s) is now %s; "
-                "previous isOn=%r, reported isOn=%r",
-                result.name,
-                result.device_id,
-                requested_state,
-                result.previous_state,
-                result.reported_state,
-            )
-
-    except (ValueError, RuntimeError) as exc:
-        LOGGER.error("%s", exc)
-        return 2
-    except Exception:
-        LOGGER.exception("Unexpected ALPSTUGA display control error")
-        return 1
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-
