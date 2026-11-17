@@ -37,9 +37,9 @@ tests directory. Files are flat in the repository root:
   `hub.get()` / `hub.patch()` on `/devices/<id>` with `{"isOn": bool}`
   because the `dirigera` library has no typed API for the ALPSTUGA
   display. All devices are validated before the first PATCH; the state is
-  re-read after the PATCH to verify it.
-  - `AlpstugaDisplayScheduler` in this file is currently **not used** by
-    `read_sensors.py` (which has its own `LocalAlpstugaDisplayScheduler`).
+  re-read after the PATCH to verify it. Scheduling itself lives in
+  `read_sensors.py` (`LocalAlpstugaDisplayScheduler`); this module only
+  provides the pure `desired_display_state()` helper.
 - `install_service.sh` – idempotent systemd installer; user, group and
   project path are hard-coded constants at the top.
 

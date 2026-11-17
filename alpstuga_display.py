@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time
 from typing import Any, Protocol, Sequence
 
 
@@ -312,126 +312,6 @@ def desired_display_state(
         )
 
     return not is_off_interval
-
-
-def local_datetime(day: date, clock_time: time) -> datetime:
-    """Build a timezone-aware datetime using the system local timezone."""
-    return datetime.combine(day, clock_time).astimezone()
-
-
-class AlpstugaDisplayScheduler:
-    """Apply and schedule ALPSTUGA display state transitions."""
-
-    def __init__(
-        self,
-        hub: DirigeraHubProtocol,
-        device_ids: Sequence[str],
-        off_time: time,
-        on_time: time,
-    ) -> None:
-        self._hub = hub
-        self._device_ids = tuple(device_ids)
-        self._off_time = off_time
-        self._on_time = on_time
-        self._applied_state: bool | None = None
-
-        if not self._device_ids:
-            raise ValueError(
-                "ALPSTUGA display scheduler requires at least one device ID"
-            )
-
-        if off_time == on_time:
-            raise ValueError(
-                "ALPSTUGA_DISPLAY_CONTROL_OFF_TIME and "
-                "ALPSTUGA_DISPLAY_CONTROL_ON_TIME must be different"
-            )
-
-    @property
-    def device_ids(self) -> tuple[str, ...]:
-        """Return configured display endpoint IDs."""
-        return self._device_ids
-
-    @property
-    def off_time(self) -> time:
-        """Return the configured local display-off time."""
-        return self._off_time
-
-    @property
-    def on_time(self) -> time:
-        """Return the configured local display-on time."""
-        return self._on_time
-
-    def apply_current_state(
-        self,
-        *,
-        now: datetime | None = None,
-        force: bool = False,
-    ) -> list[DisplayUpdateResult]:
-        """Apply the display state required at the current local time.
-
-        No request is sent when the desired state has already been applied,
-        unless ``force=True`` is specified.
-
-        The internal applied state is updated only after all configured
-        displays were successfully changed and verified. Failed operations
-        are therefore retried on the next scheduler invocation.
-        """
-        current = now.astimezone() if now is not None else datetime.now().astimezone()
-
-        enabled = desired_display_state(
-            current_time=current.time().replace(tzinfo=None),
-            off_time=self._off_time,
-            on_time=self._on_time,
-        )
-
-        if not force and enabled == self._applied_state:
-            return []
-
-        results = set_alpstuga_displays(
-            hub=self._hub,
-            device_ids=self._device_ids,
-            enabled=enabled,
-            verify=True,
-        )
-
-        self._applied_state = enabled
-        return results
-
-    def seconds_until_next_transition(
-        self,
-        *,
-        now: datetime | None = None,
-    ) -> float:
-        """Return seconds until the next configured on/off transition."""
-        current = now.astimezone() if now is not None else datetime.now().astimezone()
-
-        candidates: list[datetime] = []
-
-        for day_offset in (0, 1, 2):
-            candidate_day = current.date() + timedelta(days=day_offset)
-
-            candidates.extend(
-                (
-                    local_datetime(candidate_day, self._off_time),
-                    local_datetime(candidate_day, self._on_time),
-                )
-            )
-
-        future_candidates = [
-            candidate
-            for candidate in candidates
-            if candidate > current
-        ]
-
-        if not future_candidates:
-            return 1.0
-
-        next_transition = min(future_candidates)
-
-        return max(
-            0.0,
-            (next_transition - current).total_seconds(),
-        )
 
 
 def configure_logging() -> None:
