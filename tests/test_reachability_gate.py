@@ -6,7 +6,7 @@ from typing import Callable
 
 import pytest
 
-from read_sensors import (
+from dirigera_sensor_collector.service import (
     InfluxDecision,
     InfluxStatus,
     ReachabilityGate,

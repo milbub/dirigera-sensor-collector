@@ -9,7 +9,7 @@ import pytest
 from dirigera import EnvironmentSensor
 
 from fakes import ALPSTUGA_ID, TIMMERFLOTE_ID, FakeHub, alpstuga_device, timmerflote_device
-from read_sensors import (
+from dirigera_sensor_collector.service import (
     SensorReading,
     merge_sensor_readings,
     read_sensors,

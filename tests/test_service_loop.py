@@ -6,9 +6,9 @@ from datetime import datetime, time
 
 import pytest
 
-import read_sensors
+from dirigera_sensor_collector import service
 from fakes import ALPSTUGA_ID, TIMMERFLOTE_ID, FakeHub
-from read_sensors import (
+from dirigera_sensor_collector.service import (
     InfluxOutput,
     LocalAlpstugaDisplayScheduler,
     ReachabilityGate,
@@ -201,7 +201,7 @@ class TestMain:
     def test_invalid_configuration_exits_with_2(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        assert read_sensors.main() == 2
+        assert service.main() == 2
         assert "DIRIGERA_IP is empty" in caplog.text
 
     def test_run_stops_on_stop_event(
@@ -211,22 +211,22 @@ class TestMain:
         fake_hub: FakeHub,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        monkeypatch.setattr(read_sensors, "Hub", lambda **_kwargs: fake_hub)
+        monkeypatch.setattr(service, "Hub", lambda **_kwargs: fake_hub)
         # Stop after the first polling cycle.
-        original = read_sensors.poll_and_output_sensors
+        original = service.poll_and_output_sensors
 
         def poll_once(*args, **kwargs):  # type: ignore[no-untyped-def]
             result = original(*args, **kwargs)
-            read_sensors.STOP_EVENT.set()
+            service.STOP_EVENT.set()
             return result
 
-        monkeypatch.setattr(read_sensors, "poll_and_output_sensors", poll_once)
-        monkeypatch.setattr(read_sensors, "install_signal_handlers", lambda: None)
-        read_sensors.STOP_EVENT.clear()
+        monkeypatch.setattr(service, "poll_and_output_sensors", poll_once)
+        monkeypatch.setattr(service, "install_signal_handlers", lambda: None)
+        service.STOP_EVENT.clear()
 
         try:
-            assert read_sensors.main() == 0
+            assert service.main() == 0
         finally:
-            read_sensors.STOP_EVENT.clear()
+            service.STOP_EVENT.clear()
 
         assert "Living room [alpstuga-0001, online" in capsys.readouterr().out

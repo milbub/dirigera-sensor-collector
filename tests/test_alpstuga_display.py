@@ -6,8 +6,8 @@ from datetime import time
 
 import pytest
 
-import alpstuga_display
-from alpstuga_display import (
+from dirigera_sensor_collector import display
+from dirigera_sensor_collector.display import (
     desired_display_state,
     is_alpstuga_device,
     parse_clock_time,
@@ -164,7 +164,7 @@ class TestCli:
     ) -> None:
         monkeypatch.setattr("sys.argv", ["alpstuga_display.py"])
 
-        assert alpstuga_display.main() == 2
+        assert display.main() == 2
         assert "Usage" in capsys.readouterr().err
 
     @pytest.mark.parametrize(
@@ -189,7 +189,7 @@ class TestCli:
         for name, value in env.items():
             monkeypatch.setenv(name, value)
 
-        assert alpstuga_display.main() == 2
+        assert display.main() == 2
         assert message in caplog.text
 
     def test_switches_displays(
@@ -203,5 +203,5 @@ class TestCli:
         monkeypatch.setenv("ALPSTUGA_DISPLAY_CONTROL_IDS", ALPSTUGA_ID)
         monkeypatch.setattr("dirigera.Hub", lambda **_kwargs: fake_hub)
 
-        assert alpstuga_display.main() == 0
+        assert display.main() == 0
         assert fake_hub.devices[ALPSTUGA_ID]["attributes"]["isOn"] is False

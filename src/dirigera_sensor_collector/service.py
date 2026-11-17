@@ -18,7 +18,7 @@ from typing import Any
 
 from dirigera import EnvironmentSensor, Hub
 
-from alpstuga_display import (
+from .display import (
     DisplayUpdateResult,
     desired_display_state,
     parse_clock_time,

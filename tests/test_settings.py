@@ -6,7 +6,7 @@ from datetime import time
 
 import pytest
 
-from read_sensors import Settings, env_bool, env_csv_set, env_float, env_int
+from dirigera_sensor_collector.service import Settings, env_bool, env_csv_set, env_float, env_int
 
 
 class TestEnvHelpers:
