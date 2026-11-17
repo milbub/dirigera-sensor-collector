@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parent.parent / "install_service.sh"
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+SCRIPT = PROJECT_DIR / "deploy" / "install_service.sh"
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None,
@@ -53,8 +54,8 @@ def test_help() -> None:
         "--uninstall",
     ):
         assert option in result.stdout
-    # The default project directory is the script's own directory.
-    assert str(SCRIPT.parent) in result.stdout
+    # The default project directory is the repository root, not deploy/.
+    assert f"(default: {PROJECT_DIR})" in result.stdout
 
 
 def test_unknown_option() -> None:

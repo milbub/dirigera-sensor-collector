@@ -3,11 +3,12 @@
 # Install, update or remove the systemd service for the DIRIGERA sensor reader.
 #
 # Usage:
-#   sudo ./install_service.sh [options]
-#   sudo ./install_service.sh --uninstall [--service-name NAME]
+#   sudo deploy/install_service.sh [options]
+#   sudo deploy/install_service.sh --uninstall [--service-name NAME]
 #
-# Run with --help for all options. Without options, the service runs from the
-# directory containing this script, as the user who invoked sudo.
+# Run with --help for all options. Without options, the service runs the
+# package installed in the project's .venv (the repository containing this
+# script), as the user who invoked sudo.
 #
 # The script is idempotent: it can be run repeatedly to update the unit.
 
@@ -16,19 +17,23 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SCRIPT_DIR
 
+# This script lives in <project>/deploy/.
+DEFAULT_PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+readonly DEFAULT_PROJECT_DIR
+
+readonly PACKAGE="dirigera_sensor_collector"
+
 # Configuration; may be overridden by command-line options.
 SERVICE_NAME="dirigera-sensors"
 SERVICE_USER=""
 SERVICE_GROUP=""
-PROJECT_DIR="${SCRIPT_DIR}"
+PROJECT_DIR="${DEFAULT_PROJECT_DIR}"
 PYTHON_BIN=""
 ENV_FILE=""
 UNINSTALL=false
 
 # Derived in resolve_configuration().
 SERVICE_FILE=""
-APPLICATION=""
-DISPLAY_MODULE=""
 
 log() {
     printf '[INFO] %s\n' "$*"
@@ -47,13 +52,14 @@ usage() {
     cat <<EOF
 Usage: sudo $0 [options]
 
-Install or update a systemd service that runs read_sensors.py.
+Install or update a systemd service that runs the dirigera-sensor-collector
+package (python -m ${PACKAGE}) from the project's virtual environment.
 
 Options:
   -u, --user USER          Service user (default: the user who ran sudo,
                            otherwise the owner of the project directory)
   -g, --group GROUP        Service group (default: primary group of USER)
-  -d, --project-dir DIR    Project directory (default: ${SCRIPT_DIR})
+  -d, --project-dir DIR    Project directory (default: ${DEFAULT_PROJECT_DIR})
   -p, --python PATH        Python interpreter (default: DIR/.venv/bin/python)
   -e, --env-file PATH      Environment file (default: DIR/.env)
   -n, --service-name NAME  systemd unit name (default: ${SERVICE_NAME})
@@ -143,8 +149,6 @@ resolve_configuration() {
     PROJECT_DIR="$(cd -- "${PROJECT_DIR}" && pwd -P)"
     PYTHON_BIN="${PYTHON_BIN:-${PROJECT_DIR}/.venv/bin/python}"
     ENV_FILE="${ENV_FILE:-${PROJECT_DIR}/.env}"
-    APPLICATION="${PROJECT_DIR}/read_sensors.py"
-    DISPLAY_MODULE="${PROJECT_DIR}/alpstuga_display.py"
 
     if [[ -z "${SERVICE_USER}" ]]; then
         if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
@@ -179,11 +183,8 @@ resolve_configuration() {
 }
 
 validate_files() {
-    [[ -f "${APPLICATION}" ]] \
-        || die "Application does not exist: ${APPLICATION}"
-
-    [[ -f "${DISPLAY_MODULE}" ]] \
-        || die "Required module does not exist: ${DISPLAY_MODULE}"
+    [[ -f "${PROJECT_DIR}/pyproject.toml" ]] \
+        || die "${PROJECT_DIR} does not look like the project directory (pyproject.toml is missing). Use --project-dir"
 
     [[ -f "${ENV_FILE}" ]] \
         || die "Environment file does not exist: ${ENV_FILE}"
@@ -191,8 +192,8 @@ validate_files() {
     [[ -x "${PYTHON_BIN}" ]] \
         || die "Python interpreter is missing or not executable: ${PYTHON_BIN}. Create the virtual environment first (see README.md)"
 
-    if ! runuser -u "${SERVICE_USER}" -- test -r "${APPLICATION}"; then
-        die "User ${SERVICE_USER} cannot read ${APPLICATION}"
+    if ! runuser -u "${SERVICE_USER}" -- test -r "${PROJECT_DIR}/pyproject.toml"; then
+        die "User ${SERVICE_USER} cannot read ${PROJECT_DIR}"
     fi
 
     if ! runuser -u "${SERVICE_USER}" -- test -r "${ENV_FILE}"; then
@@ -260,23 +261,22 @@ protect_env_file() {
 }
 
 validate_python_application() {
-    log "Checking Python syntax"
+    log "Checking that ${PACKAGE} is installed"
 
-    runuser -u "${SERVICE_USER}" -- \
-        "${PYTHON_BIN}" -m py_compile \
-        "${APPLICATION}" \
-        "${DISPLAY_MODULE}" \
-        || die "Python syntax validation failed"
+    local package_dir
 
-    log "Checking Python dependencies"
+    # Importing the service module also imports all runtime dependencies.
+    package_dir="$(
+        runuser -u "${SERVICE_USER}" -- \
+            "${PYTHON_BIN}" -c "import os, ${PACKAGE}.service as m; print(os.path.dirname(m.__file__))"
+    )" || die "${PACKAGE} cannot be imported. Run: ${PYTHON_BIN} -m pip install -e ${PROJECT_DIR}"
 
-    runuser -u "${SERVICE_USER}" -- \
-        "${PYTHON_BIN}" -c 'import dirigera' \
-        || die "The dirigera package is not installed. Run: ${PYTHON_BIN} -m pip install -r ${PROJECT_DIR}/requirements.txt"
+    log "Package location: ${package_dir}"
 
-    if ! runuser -u "${SERVICE_USER}" -- \
-        "${PYTHON_BIN}" -c 'import influxdb_client' 2>/dev/null; then
-        warn "influxdb-client is not installed; InfluxDB output and dry-run will not work"
+    if [[ "${package_dir}" != "${PROJECT_DIR}/src/${PACKAGE}" ]]; then
+        warn "The package is not an editable install of ${PROJECT_DIR}"
+        warn "Code changes in the project directory will not take effect until it is reinstalled"
+        warn "Recommended command: ${PYTHON_BIN} -m pip install -e ${PROJECT_DIR}"
     fi
 }
 
@@ -310,7 +310,7 @@ Environment="PATH=$(dirname -- "${PYTHON_BIN}"):/usr/local/sbin:/usr/local/bin:/
 Environment="PYTHONUNBUFFERED=1"
 Environment="PYTHONDONTWRITEBYTECODE=1"
 
-ExecStart=${PYTHON_BIN} ${APPLICATION}
+ExecStart=${PYTHON_BIN} -m ${PACKAGE}
 
 Restart=on-failure
 RestartSec=10s
