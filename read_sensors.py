@@ -384,22 +384,19 @@ class SensorReading:
             observed_at=datetime.now(timezone.utc),
         )
 
-    def measurement_fields(self) -> dict[str, int | float | bool]:
-        """Return all available values suitable for InfluxDB fields."""
-        possible_fields: dict[str, int | float | bool | None] = {
+    def measurement_fields(self) -> dict[str, int | float]:
+        """Return all available values suitable for InfluxDB fields.
+
+        Reachability is intentionally not a field: readings of unreachable
+        devices are never written (see ``ReachabilityGate``).
+        """
+        possible_fields: dict[str, int | float | None] = {
             "temperature": self.temperature,
             "humidity": self.humidity,
             "co2": self.co2,
             "pm25": self.pm25,
             "voc_index": self.voc_index,
             "battery_percentage": self.battery_percentage,
-
-            # Store reachability as a native InfluxDB boolean field.
-            # The line protocol representation is:
-            #
-            #   reachable=true
-            #   reachable=false
-            "reachable": self.reachable,
         }
 
         return {
@@ -780,7 +777,6 @@ class InfluxOutput:
             "pm25",
             "voc_index",
             "battery_percentage",
-            "reachable",
         }
     )
 
