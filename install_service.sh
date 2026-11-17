@@ -42,11 +42,11 @@ require_root() {
 
 validate_user() {
     if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
-        die "User ${SERVICE_USER!r} does not exist"
+        die "User '${SERVICE_USER}' does not exist"
     fi
 
     if ! getent group "${SERVICE_GROUP}" >/dev/null 2>&1; then
-        die "Group ${SERVICE_GROUP!r} does not exist"
+        die "Group '${SERVICE_GROUP}' does not exist"
     fi
 }
 
