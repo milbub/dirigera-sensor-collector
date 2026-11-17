@@ -42,8 +42,8 @@ Pinned dependencies (`requirements.txt`):
 ## Installation
 
 ```bash
-git clone <repository-url> dirigera
-cd dirigera
+git clone <repository-url>
+cd dirigera-sensor-collector
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -166,17 +166,49 @@ ALPSTUGA has no `battery_percentage`).
 `install_service.sh` creates, validates, enables and (re)starts
 `dirigera-sensors.service`. It is idempotent – run it again after changes.
 
-Before running, edit the constants at the top of the script
-(`SERVICE_USER`, `SERVICE_GROUP`, `PROJECT_DIR`) to match your system. The
-project directory must contain `.venv/`, `.env`, `read_sensors.py` and
-`alpstuga_display.py`.
+Complete the [installation](#installation) steps first (virtual
+environment in `.venv/` and a `.env` file), then run from the project
+directory:
 
 ```bash
 sudo ./install_service.sh
 ```
 
+By default the service:
+
+- runs from the directory containing `install_service.sh`,
+- runs as the user who invoked `sudo` (or the owner of the project
+  directory) and that user's primary group – never as root,
+- uses `.venv/bin/python` and `.env` from the project directory.
+
+Override any of these with options:
+
+| Option | Default |
+| --- | --- |
+| `-u`, `--user USER` | `$SUDO_USER`, otherwise owner of the project directory |
+| `-g`, `--group GROUP` | primary group of the user |
+| `-d`, `--project-dir DIR` | directory of the script |
+| `-p`, `--python PATH` | `DIR/.venv/bin/python` |
+| `-e`, `--env-file PATH` | `DIR/.env` |
+| `-n`, `--service-name NAME` | `dirigera-sensors` |
+
+```bash
+sudo ./install_service.sh --user sensors --project-dir /opt/dirigera-sensor-collector
+```
+
+Paths must not contain whitespace, `%`, `"` or `\` (they would need escaping
+in the systemd unit).
+
+Follow the logs:
+
 ```bash
 journalctl -u dirigera-sensors.service -f
+```
+
+Remove the service (project files are left untouched):
+
+```bash
+sudo ./install_service.sh --uninstall
 ```
 
 ## Project structure
@@ -185,7 +217,7 @@ journalctl -u dirigera-sensors.service -f
 | --- | --- |
 | `read_sensors.py` | Main service: configuration, polling loop, endpoint merging, InfluxDB output, display scheduling |
 | `alpstuga_display.py` | ALPSTUGA display control library + standalone `on`/`off` CLI |
-| `install_service.sh` | systemd unit installer |
+| `install_service.sh` | systemd service installer / uninstaller |
 | `requirements.txt` | Pinned Python dependencies |
 
 ## License

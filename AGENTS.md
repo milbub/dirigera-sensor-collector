@@ -40,8 +40,10 @@ tests directory. Files are flat in the repository root:
   re-read after the PATCH to verify it. Scheduling itself lives in
   `read_sensors.py` (`LocalAlpstugaDisplayScheduler`); this module only
   provides the pure `desired_display_state()` helper.
-- `install_service.sh` – idempotent systemd installer; user, group and
-  project path are hard-coded constants at the top.
+- `install_service.sh` – idempotent systemd installer/uninstaller. Nothing
+  is hard-coded: project dir defaults to the script's directory, user to
+  `$SUDO_USER` (or the project dir owner), all overridable by options.
+  Keep it generic – no personal usernames, hosts or paths.
 
 ## Conventions
 
