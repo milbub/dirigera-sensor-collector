@@ -1,6 +1,6 @@
 # dirigera-sensor-collector
 
-A small, self-contained Python service that reads IKEA environment sensors
+A small Python service that reads IKEA environment sensors
 (**ALPSTUGA** air quality monitor, **TIMMERFLOTE** temperature/humidity
 sensor, and any other device the hub reports as `environmentSensor`, e.g.
 VINDSTYRKA) through an **IKEA DIRIGERA** hub and writes the readings to
@@ -24,7 +24,7 @@ morning on a local-time schedule.
 - ALPSTUGA display scheduler (overnight intervals supported), evaluated once
   per second independently of sensor polling, with validation before and
   verification after every change.
-- Standalone CLI to switch ALPSTUGA displays on/off manually.
+- Standalone `alpstuga-display on|off` command to switch displays manually.
 - Robust long-running loop: transient hub or InfluxDB errors are logged and
   retried, clean shutdown on `SIGINT`/`SIGTERM`.
 - systemd installer with hardening options.
@@ -35,7 +35,8 @@ morning on a local-time schedule.
 - IKEA DIRIGERA hub reachable on the local network and an API token
 - InfluxDB 2.x (optional – only when writing is enabled)
 
-Pinned dependencies (`requirements.txt`):
+Runtime dependencies are pinned exactly in `requirements.txt`, which
+`pyproject.toml` reads, so installing the package installs these versions:
 
 | Package | Version |
 | --- | --- |
@@ -48,7 +49,22 @@ Pinned dependencies (`requirements.txt`):
 git clone <repository-url>
 cd dirigera-sensor-collector
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
+```
+
+The editable install (`-e`) makes a `git pull` take effect after a service
+restart, without reinstalling. It provides two commands in `.venv/bin/`:
+
+| Command | Purpose |
+| --- | --- |
+| `dirigera-sensor-collector` | The collector service (same as `python -m dirigera_sensor_collector`) |
+| `alpstuga-display on\|off` | Switch ALPSTUGA displays manually |
+
+Create the configuration from the example and fill in at least
+`DIRIGERA_IP` and `DIRIGERA_TOKEN`:
+
+```bash
+cp .env.example .env && chmod 640 .env
 ```
 
 ### Get a DIRIGERA token
@@ -65,9 +81,9 @@ The token grants full control over the hub – keep it only in `.env`
 
 ### Find device IDs
 
-Sensor IDs appear in the output of `read_sensors.py`. For the ALPSTUGA
-display scheduler you need the **exact endpoint ID including the `_1`
-suffix** (the normalized ID printed by `read_sensors.py` has the suffix
+Sensor IDs appear in the output of `dirigera-sensor-collector`. For the
+ALPSTUGA display scheduler you need the **exact endpoint ID including the
+`_1` suffix** (the normalized ID printed by the collector has the suffix
 removed). List them with:
 
 ```bash
@@ -78,7 +94,8 @@ removed). List them with:
 
 All configuration is read from environment variables. For the systemd
 service they live in `.env` in the project directory, using plain
-`NAME=value` lines (no `export`, no `source`).
+`NAME=value` lines (no `export`, no `source`). [`.env.example`](.env.example)
+lists every variable with its default.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -103,7 +120,7 @@ service they live in `.env` in the project directory, using plain
 
 Boolean variables accept `true/false`, `1/0`, `yes/no`, `on/off`.
 
-Example `.env`:
+Example `.env` with InfluxDB and the display schedule enabled:
 
 ```ini
 DIRIGERA_IP=192.168.1.20
@@ -125,7 +142,7 @@ ALPSTUGA_DISPLAY_CONTROL_ON_TIME=06:30:00
 Run in the foreground (loads variables from `.env` into the shell first):
 
 ```bash
-set -a; . ./.env; set +a; .venv/bin/python read_sensors.py
+set -a; . ./.env; set +a; .venv/bin/dirigera-sensor-collector
 ```
 
 Example output:
@@ -141,17 +158,17 @@ enabled.
 Test the InfluxDB mapping without writing anything:
 
 ```bash
-INFLUX_DRY_RUN=true .venv/bin/python read_sensors.py
+INFLUX_DRY_RUN=true .venv/bin/dirigera-sensor-collector
 ```
 
 Switch ALPSTUGA displays manually:
 
 ```bash
-.venv/bin/python alpstuga_display.py off
+.venv/bin/alpstuga-display off
 ```
 
 ```bash
-.venv/bin/python alpstuga_display.py on
+.venv/bin/alpstuga-display on
 ```
 
 ## InfluxDB data model
@@ -198,20 +215,22 @@ start without a hold.
 
 ## Running as a systemd service
 
-`install_service.sh` creates, validates, enables and (re)starts
-`dirigera-sensors.service`. It is idempotent – run it again after changes.
+`deploy/install_service.sh` creates, validates, enables and (re)starts
+`dirigera-sensors.service`, which runs `python -m dirigera_sensor_collector`
+from the virtual environment. It is idempotent – run it again after changes.
 
-Complete the [installation](#installation) steps first (virtual
-environment in `.venv/` and a `.env` file), then run from the project
-directory:
+Complete the [installation](#installation) steps first (package installed
+in `.venv/` and a `.env` file), then run from the project directory:
 
 ```bash
-sudo ./install_service.sh
+sudo deploy/install_service.sh
 ```
 
-By default the service:
+The installer checks that the package imports as the service user and
+warns if it is not an editable install of the project directory. By
+default the service:
 
-- runs from the directory containing `install_service.sh`,
+- uses the repository containing `deploy/` as the project directory,
 - runs as the user who invoked `sudo` (or the owner of the project
   directory) and that user's primary group – never as root,
 - uses `.venv/bin/python` and `.env` from the project directory.
@@ -222,13 +241,13 @@ Override any of these with options:
 | --- | --- |
 | `-u`, `--user USER` | `$SUDO_USER`, otherwise owner of the project directory |
 | `-g`, `--group GROUP` | primary group of the user |
-| `-d`, `--project-dir DIR` | directory of the script |
+| `-d`, `--project-dir DIR` | parent of `deploy/` |
 | `-p`, `--python PATH` | `DIR/.venv/bin/python` |
 | `-e`, `--env-file PATH` | `DIR/.env` |
 | `-n`, `--service-name NAME` | `dirigera-sensors` |
 
 ```bash
-sudo ./install_service.sh --user sensors --project-dir /opt/dirigera-sensor-collector
+sudo deploy/install_service.sh --user sensors --project-dir /opt/dirigera-sensor-collector
 ```
 
 Paths must not contain whitespace, `%`, `"` or `\` (they would need escaping
@@ -243,19 +262,61 @@ journalctl -u dirigera-sensors.service -f
 Remove the service (project files are left untouched):
 
 ```bash
-sudo ./install_service.sh --uninstall
+sudo deploy/install_service.sh --uninstall
+```
+
+### Updating
+
+```bash
+git pull
+```
+
+```bash
+.venv/bin/pip install -e .
+```
+
+```bash
+sudo systemctl restart dirigera-sensors.service
+```
+
+Reinstalling is only needed when dependencies or entry points changed, but
+it is always safe.
+
+### Upgrading from the single-file layout
+
+Earlier versions ran `read_sensors.py` directly. After pulling this
+version, install the package and re-run the installer so the unit uses the
+new command; `.env` stays unchanged:
+
+```bash
+.venv/bin/pip install -e .
+```
+
+```bash
+sudo deploy/install_service.sh
 ```
 
 ## Project structure
 
-| File | Purpose |
-| --- | --- |
-| `read_sensors.py` | Main service: configuration, polling loop, endpoint merging, InfluxDB output, display scheduling |
-| `alpstuga_display.py` | ALPSTUGA display control library + standalone `on`/`off` CLI |
-| `install_service.sh` | systemd service installer / uninstaller |
-| `requirements.txt` | Pinned Python dependencies |
-| `requirements-dev.txt` | Runtime dependencies plus pytest |
-| `tests/` | pytest suite |
+```text
+├── pyproject.toml           package metadata, commands, pytest config
+├── requirements.txt         pinned runtime dependencies
+├── requirements-dev.txt     + pytest and an editable install
+├── .env.example             configuration template
+├── deploy/
+│   └── install_service.sh   systemd service installer / uninstaller
+├── src/dirigera_sensor_collector/
+│   ├── __main__.py          python -m dirigera_sensor_collector
+│   ├── config.py            Settings loaded from environment variables
+│   ├── sensors.py           sensor normalization and endpoint merging
+│   ├── reachability.py      unreachable filtering and recovery hold
+│   ├── influx.py            InfluxDB points, writes and dry-run
+│   ├── display.py           ALPSTUGA validation and display switching
+│   ├── display_cli.py       alpstuga-display command
+│   ├── scheduler.py         local-time display schedule
+│   └── service.py           polling loop and entry point
+└── tests/                   pytest suite, one module per source module
+```
 
 ## Development
 

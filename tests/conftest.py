@@ -9,7 +9,7 @@ from typing import Any, Callable
 import pytest
 
 from fakes import APP_ENV_PREFIXES, FakeHub, alpstuga_device, timmerflote_device
-from read_sensors import SensorReading
+from dirigera_sensor_collector.sensors import SensorReading
 
 
 @pytest.fixture(autouse=True)

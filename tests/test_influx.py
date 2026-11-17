@@ -1,4 +1,4 @@
-"""Tests for InfluxDB point creation, dry-run and writing (read_sensors.py)."""
+"""Tests for InfluxDB point creation, dry-run and writing (influx.py)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from typing import Any, Callable
 
 import pytest
 
-from read_sensors import InfluxOutput, SensorReading, Settings
+from dirigera_sensor_collector.config import Settings
+from dirigera_sensor_collector.influx import InfluxOutput
+from dirigera_sensor_collector.sensors import SensorReading
 
 ReadingFactory = Callable[..., SensorReading]
 

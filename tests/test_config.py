@@ -1,4 +1,4 @@
-"""Tests for configuration loading (read_sensors.Settings and env helpers)."""
+"""Tests for configuration loading (config.py)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,14 @@ from datetime import time
 
 import pytest
 
-from read_sensors import Settings, env_bool, env_csv_set, env_float, env_int
+from dirigera_sensor_collector.config import (
+    Settings,
+    env_bool,
+    env_csv_set,
+    env_float,
+    env_int,
+    parse_clock_time,
+)
 
 
 class TestEnvHelpers:
@@ -56,6 +63,20 @@ class TestEnvHelpers:
 
         monkeypatch.delenv("LIST")
         assert env_csv_set("LIST") == frozenset()
+
+
+class TestParseClockTime:
+    def test_parse_clock_time(self) -> None:
+        assert parse_clock_time(" 22:05:30 ", "VAR") == time(22, 5, 30)
+
+    @pytest.mark.parametrize("raw", ["22:00", "25:00:00", "noon"])
+    def test_parse_clock_time_invalid_format(self, raw: str) -> None:
+        with pytest.raises(ValueError, match="VAR must use the HH:MM:SS"):
+            parse_clock_time(raw, "VAR")
+
+    def test_parse_clock_time_empty(self) -> None:
+        with pytest.raises(ValueError, match="VAR must not be empty"):
+            parse_clock_time("  ", "VAR")
 
 
 @pytest.mark.usefixtures("base_env")
