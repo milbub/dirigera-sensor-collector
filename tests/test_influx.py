@@ -1,4 +1,4 @@
-"""Tests for InfluxDB point creation, dry-run and writing (read_sensors.py)."""
+"""Tests for InfluxDB point creation, dry-run and writing (influx.py)."""
 
 from __future__ import annotations
 

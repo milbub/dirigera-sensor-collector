@@ -1,4 +1,4 @@
-"""Tests for sensor normalization and endpoint merging (read_sensors.py)."""
+"""Tests for sensor normalization and endpoint merging (sensors.py)."""
 
 from __future__ import annotations
 

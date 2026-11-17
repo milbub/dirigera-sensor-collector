@@ -1,4 +1,4 @@
-"""Tests for reachability filtering and the InfluxDB recovery hold."""
+"""Tests for reachability filtering and the recovery hold (reachability.py)."""
 
 from __future__ import annotations
 
