@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from typing import Any
 
-from dirigera import Hub
+from dirigera import EnvironmentSensor, Hub
 
 from alpstuga_display import (
     DisplayUpdateResult,
@@ -153,7 +153,7 @@ class Settings:
         settings = cls(
             dirigera_ip=os.getenv(
                 "DIRIGERA_IP",
-                "192.168.0.6",
+                "",
             ).strip(),
             dirigera_token=os.getenv(
                 "DIRIGERA_TOKEN",
@@ -208,7 +208,10 @@ class Settings:
     def validate(self) -> None:
         """Validate configuration before connecting to external services."""
         if not self.dirigera_ip:
-            raise ValueError("DIRIGERA_IP must not be empty")
+            raise ValueError(
+                "DIRIGERA_IP is empty. "
+                "Set it to the IP address of your DIRIGERA hub."
+            )
 
         if not self.dirigera_token:
             raise ValueError(
@@ -290,78 +293,40 @@ class SensorReading:
     observed_at: datetime
 
     @classmethod
-    def from_sensor(cls, sensor: Any) -> "SensorReading":
-        """Create a normalized reading from a DIRIGERA sensor model."""
+    def from_sensor(cls, sensor: EnvironmentSensor) -> "SensorReading":
+        """Create a normalized reading from a DIRIGERA sensor model.
+
+        ``EnvironmentSensor`` is a typed pydantic model exported by the
+        dirigera library (since 1.3). All measurement attributes are optional
+        and default to ``None`` when a device does not report them, e.g.
+        TIMMERFLOTE reports no CO2 and ALPSTUGA reports no battery level.
+        """
         attributes = sensor.attributes
 
         sensor_id = str(sensor.id)
-        custom_name = getattr(
-            attributes,
-            "custom_name",
-            None,
-        )
-        model = getattr(
-            attributes,
-            "model",
-            None,
-        )
-
-        room = getattr(sensor, "room", None)
-        room_name = (
-            getattr(room, "name", None)
-            if room is not None
-            else None
-        )
 
         # Clean whitespace before displaying values or using them as
         # InfluxDB tags.
-        if custom_name:
-            custom_name = custom_name.strip()
-
-        if model:
-            model = model.strip()
-
-        if room_name:
-            room_name = room_name.strip()
+        custom_name = (attributes.custom_name or "").strip() or None
+        model = (attributes.model or "").strip() or None
+        room_name = (
+            (sensor.room.name or "").strip() or None
+            if sensor.room is not None
+            else None
+        )
 
         return cls(
             sensor_id=sensor_id,
             name=custom_name or model or sensor_id,
             model=model,
             room=room_name,
-            reachable=bool(
-                getattr(sensor, "is_reachable", False)
-            ),
-            temperature=getattr(
-                attributes,
-                "current_temperature",
-                None,
-            ),
-            humidity=getattr(
-                attributes,
-                "current_r_h",
-                None,
-            ),
-            co2=getattr(
-                attributes,
-                "current_c_o2",
-                None,
-            ),
-            pm25=getattr(
-                attributes,
-                "current_p_m25",
-                None,
-            ),
-            voc_index=getattr(
-                attributes,
-                "voc_index",
-                None,
-            ),
-            battery_percentage=getattr(
-                attributes,
-                "battery_percentage",
-                None,
-            ),
+            reachable=bool(sensor.is_reachable),
+            temperature=attributes.current_temperature,
+            humidity=attributes.current_r_h,
+            co2=attributes.current_c_o2,
+            pm25=attributes.current_p_m25,
+            voc_index=attributes.voc_index,
+            battery_percentage=attributes.battery_percentage,
             observed_at=datetime.now(timezone.utc),
         )
 
