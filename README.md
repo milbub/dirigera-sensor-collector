@@ -254,6 +254,21 @@ sudo ./install_service.sh --uninstall
 | `alpstuga_display.py` | ALPSTUGA display control library + standalone `on`/`off` CLI |
 | `install_service.sh` | systemd service installer / uninstaller |
 | `requirements.txt` | Pinned Python dependencies |
+| `requirements-dev.txt` | Runtime dependencies plus pytest |
+| `tests/` | pytest suite |
+
+## Development
+
+Install the development dependencies and run the test suite. It uses an
+in-memory fake hub, so no DIRIGERA hub, InfluxDB, root or systemd is needed:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+```
+
+```bash
+.venv/bin/pytest
+```
 
 ## License
 

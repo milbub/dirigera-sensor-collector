@@ -16,8 +16,8 @@ Guidance for AI coding agents working in this repository. See
 
 ## Project overview
 
-Small, dependency-light Python service – no package, no framework, no
-tests directory. Files are flat in the repository root:
+Small, dependency-light Python service – no package, no framework. Source
+files are flat in the repository root, tests are in `tests/`:
 
 - `read_sensors.py` – main long-running service.
   - `Settings.from_environment()` loads and validates all env variables;
@@ -64,7 +64,8 @@ tests directory. Files are flat in the repository root:
 
 ## Dependencies
 
-- Versions are pinned exactly in `requirements.txt` (`==`). When updating,
+- Versions are pinned exactly in `requirements.txt` and
+  `requirements-dev.txt` (`==`). When updating,
   diff the library source between versions and reflect useful changes.
 - `dirigera` ≥ 1.3 reuses one `requests.Session` per `Hub` (keep-alive,
   connections idle > 3 s are dropped, GET/PATCH retried once on a
@@ -74,20 +75,34 @@ tests directory. Files are flat in the repository root:
   `AbstractSmartHomeHub` subclass as `dirigeraClient` (relevant for fakes
   in tests).
 
-## Verifying changes
+## Tests
 
-There is no test suite. At minimum:
+The pytest suite lives in `tests/` and needs no hub, InfluxDB, root or
+systemd:
 
 ```bash
-python3 -m py_compile read_sensors.py alpstuga_display.py
+.venv/bin/pip install -r requirements-dev.txt
 ```
 
 ```bash
-bash -n install_service.sh
+.venv/bin/pytest
 ```
 
-For behavioural checks, use a throw-away script with a fake hub
-(subclass of `dirigera.hub.abstract_smart_home_hub.AbstractSmartHomeHub`
-returning `EnvironmentSensor` objects) and `INFLUX_DRY_RUN=true`, or run
-against a real hub with `INFLUX_DRY_RUN=true`. Never write to a real
-InfluxDB or toggle real displays without the user's consent.
+- `tests/fakes.py` – raw DIRIGERA payload builders and `FakeHub`, an
+  in-memory hub (subclass of `AbstractSmartHomeHub`, required by the
+  pydantic models) that applies PATCHes and can simulate ignored patches
+  or connection errors.
+- `tests/conftest.py` – autouse fixture that clears every application
+  environment variable, plus `fake_hub`, `base_env` and `make_reading`.
+- Time-dependent logic takes an injectable time (`now=` monotonic for
+  `ReachabilityGate`, `local_now=` for the display scheduler); tests pass
+  explicit values instead of sleeping.
+- InfluxDB writes are tested by monkeypatching
+  `influxdb_client.InfluxDBClient`; dry-run output is asserted as exact
+  line protocol.
+
+Every new feature or bug fix comes with tests. Run the whole suite before
+each commit; it must pass.
+
+Never write to a real InfluxDB or toggle real displays without the user's
+consent.
