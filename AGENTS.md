@@ -27,6 +27,11 @@ tests directory. Files are flat in the repository root:
   - `merge_sensor_readings()` groups logical endpoints `<id>_N` into one
     physical device; endpoint `_1` has priority for the name and for
     values, then the un-suffixed ID, then higher endpoints.
+  - `ReachabilityGate` decides per physical device whether a reading is
+    written: unreachable readings are skipped, and a longer outage starts
+    an in-memory recovery hold (monotonic clock) after the reconnect. The
+    rules are documented in README "Reachability and recovery hold" – keep
+    both in sync.
   - `InfluxOutput` builds `influxdb_client.Point`s; it imports
     `influxdb_client` lazily so the service runs without it when InfluxDB
     is disabled. Dry-run never opens a connection.

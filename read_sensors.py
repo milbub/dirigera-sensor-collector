@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import signal
@@ -12,6 +13,7 @@ import threading
 import time as time_module
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
+from enum import Enum
 from typing import Any
 
 from dirigera import EnvironmentSensor, Hub
@@ -76,6 +78,36 @@ def env_bool(name: str, default: bool = False) -> bool:
     )
 
 
+def env_float(name: str, default: float) -> float:
+    """Read and validate a floating-point environment variable."""
+    value = os.getenv(name, "").strip()
+
+    if not value:
+        return default
+
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be a number; received {value!r}"
+        ) from exc
+
+
+def env_int(name: str, default: int) -> int:
+    """Read and validate an integer environment variable."""
+    value = os.getenv(name, "").strip()
+
+    if not value:
+        return default
+
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be an integer; received {value!r}"
+        ) from exc
+
+
 def env_csv_set(name: str) -> frozenset[str]:
     """Read a comma-separated environment variable as a set."""
     return frozenset(
@@ -102,6 +134,8 @@ class Settings:
     influx_measurement: str
     influx_ignored_fields: frozenset[str]
     influx_ignored_tags: frozenset[str]
+    influx_recovery_hold_seconds: float
+    influx_recovery_hold_min_unreachable_samples: int
 
     alpstuga_display_control_ids: tuple[str, ...]
     alpstuga_display_control_off_time: time | None
@@ -159,8 +193,9 @@ class Settings:
                 "DIRIGERA_TOKEN",
                 "",
             ).strip(),
-            poll_interval_seconds=float(
-                os.getenv("POLL_INTERVAL_SECONDS", "10")
+            poll_interval_seconds=env_float(
+                "POLL_INTERVAL_SECONDS",
+                default=10.0,
             ),
             influx_enabled=effective_influx_enabled,
             influx_dry_run=influx_dry_run,
@@ -189,6 +224,14 @@ class Settings:
             ),
             influx_ignored_tags=env_csv_set(
                 "INFLUX_IGNORED_TAGS"
+            ),
+            influx_recovery_hold_seconds=env_float(
+                "INFLUX_RECOVERY_HOLD_SECONDS",
+                default=1800.0,
+            ),
+            influx_recovery_hold_min_unreachable_samples=env_int(
+                "INFLUX_RECOVERY_HOLD_MIN_UNREACHABLE_SAMPLES",
+                default=2,
             ),
             alpstuga_display_control_ids=display_ids,
             alpstuga_display_control_off_time=display_off_time,
@@ -227,6 +270,17 @@ class Settings:
         if not self.influx_measurement:
             raise ValueError(
                 "INFLUX_MEASUREMENT must not be empty"
+            )
+
+        if self.influx_recovery_hold_seconds < 0:
+            raise ValueError(
+                "INFLUX_RECOVERY_HOLD_SECONDS must not be negative"
+            )
+
+        if self.influx_recovery_hold_min_unreachable_samples < 1:
+            raise ValueError(
+                "INFLUX_RECOVERY_HOLD_MIN_UNREACHABLE_SAMPLES must be "
+                "at least 1"
             )
 
         if self.influx_enabled:
@@ -330,22 +384,19 @@ class SensorReading:
             observed_at=datetime.now(timezone.utc),
         )
 
-    def measurement_fields(self) -> dict[str, int | float | bool]:
-        """Return all available values suitable for InfluxDB fields."""
-        possible_fields: dict[str, int | float | bool | None] = {
+    def measurement_fields(self) -> dict[str, int | float]:
+        """Return all available values suitable for InfluxDB fields.
+
+        Reachability is intentionally not a field: readings of unreachable
+        devices are never written (see ``ReachabilityGate``).
+        """
+        possible_fields: dict[str, int | float | None] = {
             "temperature": self.temperature,
             "humidity": self.humidity,
             "co2": self.co2,
             "pm25": self.pm25,
             "voc_index": self.voc_index,
             "battery_percentage": self.battery_percentage,
-
-            # Store reachability as a native InfluxDB boolean field.
-            # The line protocol representation is:
-            #
-            #   reachable=true
-            #   reachable=false
-            "reachable": self.reachable,
         }
 
         return {
@@ -495,6 +546,226 @@ def merge_sensor_readings(
     return merged_readings
 
 
+def format_duration(seconds: float) -> str:
+    """Format a duration as a compact human-readable string, e.g. 29m 50s."""
+    total = max(0, math.ceil(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+
+    return f"{secs}s"
+
+
+class InfluxStatus(Enum):
+    """Whether a reading may be written to InfluxDB."""
+
+    SEND = "send"
+    OFFLINE = "offline"
+    RECOVERY_HOLD = "recovery_hold"
+
+
+@dataclass(frozen=True, slots=True)
+class InfluxDecision:
+    """Result of ``ReachabilityGate.evaluate`` for one reading."""
+
+    status: InfluxStatus
+    hold_remaining_seconds: float | None = None
+
+    @property
+    def send(self) -> bool:
+        """Return whether the reading should be written to InfluxDB."""
+        return self.status is InfluxStatus.SEND
+
+    def describe(self) -> str:
+        """Return a short annotation for the terminal output line."""
+        if self.status is InfluxStatus.OFFLINE:
+            return "InfluxDB: skipped, device offline"
+
+        if self.status is InfluxStatus.RECOVERY_HOLD:
+            return (
+                "InfluxDB: recovery hold, "
+                f"{format_duration(self.hold_remaining_seconds or 0.0)} left"
+            )
+
+        return "InfluxDB: sent"
+
+
+@dataclass(slots=True)
+class _DeviceReachability:
+    """Mutable per-device state tracked by ``ReachabilityGate``."""
+
+    # Number of consecutive obtained readings with reachable=False. Failed
+    # polls produce no readings, so they neither increase nor reset it.
+    unreachable_streak: int = 0
+
+    # The current outage qualifies for a recovery hold; the countdown starts
+    # once the device is reachable again.
+    hold_pending: bool = False
+
+    # Monotonic time of the first reachable reading after a qualifying
+    # outage; None when no hold is running.
+    hold_started_at: float | None = None
+
+
+class ReachabilityGate:
+    """Decide per physical device whether its readings go to InfluxDB.
+
+    Rules:
+
+    * A reading with ``reachable=False`` is never written.
+    * When a device is unreachable for at least ``min_unreachable_samples``
+      consecutive readings, a recovery hold of ``hold_seconds`` starts at the
+      first reachable reading afterwards. Readings are not written during the
+      hold so measured values can settle after the reconnect.
+    * If the device becomes unreachable during the hold, the hold is
+      cancelled and starts again from zero once the device is reachable.
+    * ``hold_seconds=0`` disables the recovery hold; unreachable readings
+      are still skipped.
+
+    State is kept in memory only and is lost on restart.
+    """
+
+    def __init__(
+        self,
+        hold_seconds: float,
+        min_unreachable_samples: int,
+    ) -> None:
+        if hold_seconds < 0:
+            raise ValueError("hold_seconds must not be negative")
+
+        if min_unreachable_samples < 1:
+            raise ValueError("min_unreachable_samples must be at least 1")
+
+        self._hold_seconds = hold_seconds
+        self._min_unreachable_samples = min_unreachable_samples
+        self._devices: dict[str, _DeviceReachability] = {}
+
+    @property
+    def hold_seconds(self) -> float:
+        """Return the recovery hold duration in seconds."""
+        return self._hold_seconds
+
+    @property
+    def min_unreachable_samples(self) -> int:
+        """Return how many unreachable readings trigger a recovery hold."""
+        return self._min_unreachable_samples
+
+    def evaluate(
+        self,
+        reading: SensorReading,
+        now: float | None = None,
+    ) -> InfluxDecision:
+        """Update device state with one reading and return the decision.
+
+        ``now`` is a ``time.monotonic()`` value; it can be injected in tests.
+        """
+        current = time_module.monotonic() if now is None else now
+        state = self._devices.setdefault(
+            reading.sensor_id,
+            _DeviceReachability(),
+        )
+
+        if not reading.reachable:
+            return self._handle_unreachable(reading, state)
+
+        return self._handle_reachable(reading, state, current)
+
+    def _handle_unreachable(
+        self,
+        reading: SensorReading,
+        state: _DeviceReachability,
+    ) -> InfluxDecision:
+        state.unreachable_streak += 1
+
+        if state.hold_started_at is not None:
+            # Any outage during a running hold resets it; the countdown starts
+            # from zero after the next reconnect.
+            state.hold_started_at = None
+            state.hold_pending = True
+            LOGGER.info(
+                "Sensor %s (%s) became unreachable during the recovery "
+                "hold; the hold will restart from zero after it reconnects",
+                reading.name,
+                reading.sensor_id,
+            )
+        elif state.unreachable_streak == 1:
+            LOGGER.info(
+                "Sensor %s (%s) is unreachable; its readings are not "
+                "written to InfluxDB",
+                reading.name,
+                reading.sensor_id,
+            )
+
+        if (
+            self._hold_seconds > 0
+            and not state.hold_pending
+            and state.unreachable_streak >= self._min_unreachable_samples
+        ):
+            state.hold_pending = True
+            LOGGER.info(
+                "Sensor %s (%s) has been unreachable for %d consecutive "
+                "reading(s); a %s recovery hold will apply after it "
+                "reconnects",
+                reading.name,
+                reading.sensor_id,
+                state.unreachable_streak,
+                format_duration(self._hold_seconds),
+            )
+
+        return InfluxDecision(InfluxStatus.OFFLINE)
+
+    def _handle_reachable(
+        self,
+        reading: SensorReading,
+        state: _DeviceReachability,
+        now: float,
+    ) -> InfluxDecision:
+        was_unreachable = state.unreachable_streak > 0
+        state.unreachable_streak = 0
+
+        if state.hold_pending:
+            state.hold_pending = False
+            state.hold_started_at = now
+            LOGGER.info(
+                "Sensor %s (%s) is reachable again; holding InfluxDB "
+                "writes for %s",
+                reading.name,
+                reading.sensor_id,
+                format_duration(self._hold_seconds),
+            )
+        elif was_unreachable:
+            LOGGER.info(
+                "Sensor %s (%s) is reachable again; resuming InfluxDB writes",
+                reading.name,
+                reading.sensor_id,
+            )
+
+        if state.hold_started_at is None:
+            return InfluxDecision(InfluxStatus.SEND)
+
+        remaining = self._hold_seconds - (now - state.hold_started_at)
+
+        if remaining > 0:
+            return InfluxDecision(
+                InfluxStatus.RECOVERY_HOLD,
+                hold_remaining_seconds=remaining,
+            )
+
+        state.hold_started_at = None
+        LOGGER.info(
+            "Sensor %s (%s) recovery hold finished; resuming InfluxDB writes",
+            reading.name,
+            reading.sensor_id,
+        )
+
+        return InfluxDecision(InfluxStatus.SEND)
+
+
 class InfluxOutput:
     """Create InfluxDB line protocol and optionally send it to InfluxDB."""
 
@@ -506,7 +777,6 @@ class InfluxOutput:
             "pm25",
             "voc_index",
             "battery_percentage",
-            "reachable",
         }
     )
 
@@ -910,6 +1180,14 @@ def log_configuration(
 
     LOGGER.info("InfluxDB timestamps are generated in UTC")
 
+    LOGGER.info(
+        "Readings of unreachable sensors are not written to InfluxDB; "
+        "after %d or more consecutive unreachable readings a %s recovery "
+        "hold applies",
+        settings.influx_recovery_hold_min_unreachable_samples,
+        format_duration(settings.influx_recovery_hold_seconds),
+    )
+
     if display_scheduler is None:
         LOGGER.info("ALPSTUGA display scheduling is disabled")
         return
@@ -937,6 +1215,7 @@ def log_configuration(
 def poll_and_output_sensors(
     hub: Hub,
     influx: InfluxOutput,
+    gate: ReachabilityGate,
     consecutive_failures: int,
 ) -> int:
     """Run one sensor polling and output cycle."""
@@ -944,13 +1223,23 @@ def poll_and_output_sensors(
         readings = read_sensors(hub)
 
         if readings:
-            for reading in readings:
-                print(
-                    reading.display_line(),
-                    flush=True,
-                )
+            readings_to_send: list[SensorReading] = []
 
-            influx.process(readings)
+            for reading in readings:
+                # Reachability is tracked even when InfluxDB output is off,
+                # so enabling it later does not change the semantics.
+                decision = gate.evaluate(reading)
+                line = reading.display_line()
+
+                if influx.active:
+                    line = f"{line} ({decision.describe()})"
+
+                print(line, flush=True)
+
+                if decision.send:
+                    readings_to_send.append(reading)
+
+            influx.process(readings_to_send)
         else:
             LOGGER.warning(
                 "No environment sensors were returned by the hub"
@@ -979,6 +1268,12 @@ def run(settings: Settings) -> None:
     )
 
     influx = InfluxOutput(settings)
+    gate = ReachabilityGate(
+        hold_seconds=settings.influx_recovery_hold_seconds,
+        min_unreachable_samples=(
+            settings.influx_recovery_hold_min_unreachable_samples
+        ),
+    )
     display_scheduler = create_display_scheduler(
         hub,
         settings,
@@ -1023,6 +1318,7 @@ def run(settings: Settings) -> None:
                 consecutive_sensor_failures = poll_and_output_sensors(
                     hub=hub,
                     influx=influx,
+                    gate=gate,
                     consecutive_failures=consecutive_sensor_failures,
                 )
 

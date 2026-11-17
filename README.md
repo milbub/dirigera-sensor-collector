@@ -18,6 +18,9 @@ morning on a local-time schedule.
   as a service).
 - Writes to InfluxDB with configurable measurement name and optional
   filtering of fields and tags; a dry-run mode prints line protocol instead.
+- Skips readings of unreachable devices and, after a longer outage, holds
+  writes for a recovery interval so stale or unsettled values never reach
+  InfluxDB (see [Reachability and recovery hold](#reachability-and-recovery-hold)).
 - ALPSTUGA display scheduler (overnight intervals supported), evaluated once
   per second independently of sensor polling, with validation before and
   verification after every change.
@@ -92,6 +95,8 @@ service they live in `.env` in the project directory, using plain
 | `INFLUX_MEASUREMENT` | `ikea_environment_sensor` | Measurement name |
 | `INFLUX_IGNORED_FIELDS` | – | Comma-separated fields to skip |
 | `INFLUX_IGNORED_TAGS` | – | Comma-separated tags to skip |
+| `INFLUX_RECOVERY_HOLD_SECONDS` | `1800` | Recovery hold after a longer outage; `0` disables the hold |
+| `INFLUX_RECOVERY_HOLD_MIN_UNREACHABLE_SAMPLES` | `2` | Consecutive unreachable readings that trigger the hold, ≥ 1 |
 | `ALPSTUGA_DISPLAY_CONTROL_IDS` | – | Comma-separated ALPSTUGA endpoint IDs (with `_1`); enables the scheduler |
 | `ALPSTUGA_DISPLAY_CONTROL_OFF_TIME` | – | Display off time, `HH:MM:SS`, system local time |
 | `ALPSTUGA_DISPLAY_CONTROL_ON_TIME` | – | Display on time, `HH:MM:SS`, system local time |
@@ -126,9 +131,12 @@ set -a; . ./.env; set +a; .venv/bin/python read_sensors.py
 Example output:
 
 ```text
-Living room [a1b2c3…, online, room=Living room]: 22.5 °C, 41 % RH, CO₂ 650 ppm, PM2.5 3 µg/m³
-Bedroom [d4e5f6…, online, room=Bedroom]: 19.1 °C, 55 % RH, battery 87 %
+Living room [a1b2c3…, online, room=Living room]: 22.5 °C, 41 % RH, CO₂ 650 ppm, PM2.5 3 µg/m³ (InfluxDB: sent)
+Bedroom [d4e5f6…, online, room=Bedroom]: 19.1 °C, 55 % RH, battery 87 % (InfluxDB: recovery hold, 12m 30s left)
 ```
+
+The `(InfluxDB: …)` suffix is shown only when InfluxDB writing or dry-run is
+enabled.
 
 Test the InfluxDB mapping without writing anything:
 
@@ -155,11 +163,38 @@ One point per physical device and polling cycle:
   `model`, `room`
 - **Fields:** `temperature` (float, °C), `humidity` (int, % RH), `co2`
   (int, ppm), `pm25` (int, µg/m³), `voc_index` (int), `battery_percentage`
-  (int, %), `reachable` (bool)
+  (int, %)
 - **Timestamp:** UTC, taken when the reading was fetched
 
 Fields a device does not report are omitted (e.g. TIMMERFLOTE has no `co2`,
 ALPSTUGA has no `battery_percentage`).
+
+Reachability is not stored as a field: points are written only for
+reachable devices outside a recovery hold, so a gap in the series means the
+device was offline or settling.
+
+## Reachability and recovery hold
+
+When the hub reports a device as unreachable it still returns the last known
+values, and right after reconnecting the measurements may need time to
+settle. Each polling cycle therefore decides per physical device:
+
+1. **Unreachable reading** (`reachable=False`) – not written.
+2. **Longer outage** – when a device is unreachable for at least
+   `INFLUX_RECOVERY_HOLD_MIN_UNREACHABLE_SAMPLES` consecutive readings
+   (default 2), a recovery hold of `INFLUX_RECOVERY_HOLD_SECONDS` (default
+   30 minutes) starts at the first reachable reading afterwards. No readings
+   are written until the hold ends; then everything works as usual.
+3. **Outage during the hold** – any unreachable reading cancels the running
+   hold; it starts again from zero after the next reconnect.
+
+A single unreachable reading between two reachable ones is skipped but
+does not start a hold. Failed polls (hub not responding) produce no
+readings, so they neither count towards nor interrupt a series of
+unreachable readings. Transitions are logged at `INFO` level.
+
+The state is kept in memory only; after a service restart all devices
+start without a hold.
 
 ## Running as a systemd service
 
