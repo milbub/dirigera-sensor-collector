@@ -11,8 +11,8 @@ Guidance for AI coding agents working in this repository. See
 - **Never push.** Pushing is done manually by the user.
 - Commit messages: short imperative subject line in English (≤ 72 chars),
   blank line, optional body explaining *why*.
-- Never commit secrets: `.env`, tokens, real device IDs or IP addresses
-  other than the existing `192.168.0.6` default.
+- Never commit secrets or personal data: `.env`, tokens, real device IDs,
+  IP addresses, usernames or paths. Use obvious placeholders in docs.
 
 ## Project overview
 

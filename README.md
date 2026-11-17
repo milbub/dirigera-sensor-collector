@@ -54,7 +54,7 @@ The `dirigera` package installs a `generate-token` command. Run it, press the
 action button on the bottom of the hub when prompted, and confirm:
 
 ```bash
-.venv/bin/generate-token 192.168.0.6
+.venv/bin/generate-token <hub-ip>
 ```
 
 The token grants full control over the hub – keep it only in `.env`
@@ -79,7 +79,7 @@ service they live in `.env` in the project directory, using plain
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DIRIGERA_IP` | `192.168.0.6` | Hub IP address |
+| `DIRIGERA_IP` | – (required) | Hub IP address |
 | `DIRIGERA_TOKEN` | – (required) | Hub API token |
 | `POLL_INTERVAL_SECONDS` | `10` | Sensor polling interval, must be > 0 |
 | `LOG_LEVEL` | `INFO` | Python log level (`DEBUG` shows endpoint merging) |
@@ -101,7 +101,7 @@ Boolean variables accept `true/false`, `1/0`, `yes/no`, `on/off`.
 Example `.env`:
 
 ```ini
-DIRIGERA_IP=192.168.0.6
+DIRIGERA_IP=192.168.1.20
 DIRIGERA_TOKEN=replace-me
 
 INFLUX_ENABLED=true

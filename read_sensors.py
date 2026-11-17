@@ -153,7 +153,7 @@ class Settings:
         settings = cls(
             dirigera_ip=os.getenv(
                 "DIRIGERA_IP",
-                "192.168.0.6",
+                "",
             ).strip(),
             dirigera_token=os.getenv(
                 "DIRIGERA_TOKEN",
@@ -208,7 +208,10 @@ class Settings:
     def validate(self) -> None:
         """Validate configuration before connecting to external services."""
         if not self.dirigera_ip:
-            raise ValueError("DIRIGERA_IP must not be empty")
+            raise ValueError(
+                "DIRIGERA_IP is empty. "
+                "Set it to the IP address of your DIRIGERA hub."
+            )
 
         if not self.dirigera_token:
             raise ValueError(

@@ -345,7 +345,10 @@ def main() -> int:
         )
 
         if not hub_ip:
-            raise ValueError("DIRIGERA_IP must not be empty")
+            raise ValueError(
+                "DIRIGERA_IP is empty. "
+                "Set it to the IP address of your DIRIGERA hub."
+            )
 
         if not token:
             raise ValueError("DIRIGERA_TOKEN must not be empty")
